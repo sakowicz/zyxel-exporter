@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  zyxel-to-mqtt:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - MQTT_BROKER_HOST=https://mqtt.nest.222211.xyz
+      - MQTT_BROKER_PORT=1883
+      - MQTT_BROKER_USER=zyxel
+      - MQTT_BROKER_PASSWORD=zyxel
+      - ZYXEL_DEVICE_IP=192.168.1.254
+      - ZYXEL_DEVICE_USERNAME=read
+      - ZYXEL_DEVICE_PASSWORD=readme
+      - CRON_SCHEDULE=* * * * *
+    restart: unless-stopped
