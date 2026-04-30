@@ -1,0 +1,212 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+  workflow_dispatch:
+    inputs:
+      version_bump:
+        description: 'Version bump type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+
+    - name: Run tests
+      run: go test -v ./...
+
+    - name: Build
+      run: go build -v ./...
+
+  build-and-release:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Generate semantic version
+      id: semver
+      run: |
+        # Get the latest tag
+        git fetch --tags
+        LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+        echo "Latest tag: $LATEST_TAG"
+
+        # Extract version numbers
+        VERSION=${LATEST_TAG#v}
+        IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+
+        # Determine version bump type
+        BUMP_TYPE="${{ github.event.inputs.version_bump || 'patch' }}"
+
+        # Increment version based on type
+        case $BUMP_TYPE in
+          major)
+            MAJOR=$((MAJOR + 1))
+            MINOR=0
+            PATCH=0
+            ;;
+          minor)
+            MINOR=$((MINOR + 1))
+            PATCH=0
+            ;;
+          patch)
+            PATCH=$((PATCH + 1))
+            ;;
+        esac
+        NEW_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+
+        echo "Bump type: $BUMP_TYPE"
+        echo "New version: $NEW_VERSION"
+        echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+        echo "version_no_v=${NEW_VERSION#v}" >> $GITHUB_OUTPUT
+
+    - name: Create Git Tag
+      run: |
+        echo "Creating tag: ${{ steps.semver.outputs.version }}"
+        echo "Version without v: ${{ steps.semver.outputs.version_no_v }}"
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git tag ${{ steps.semver.outputs.version }}
+        git push origin ${{ steps.semver.outputs.version }}
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=raw,value=${{ steps.semver.outputs.version_no_v }}
+          type=raw,value=latest
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+
+    - name: Generate changelog
+      id: changelog
+      run: |
+        # Get commits since last tag
+        LATEST_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
+        if [ -n "$LATEST_TAG" ]; then
+          COMMITS=$(git log --pretty=format:"- %s (%h)" $LATEST_TAG..HEAD)
+        else
+          COMMITS=$(git log --pretty=format:"- %s (%h)" HEAD)
+        fi
+
+        echo "changelog<<EOF" >> $GITHUB_OUTPUT
+        echo "## Changes" >> $GITHUB_OUTPUT
+        echo "$COMMITS" >> $GITHUB_OUTPUT
+        echo "" >> $GITHUB_OUTPUT
+        echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/$LATEST_TAG...${{ steps.semver.outputs.version }}" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+    - name: Create Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.semver.outputs.version }}
+        release_name: Release ${{ steps.semver.outputs.version }}
+        body: |
+          Automated release ${{ steps.semver.outputs.version }}
+
+          ## Docker Images
+          - `ghcr.io/${{ github.repository }}:${{ steps.semver.outputs.version_no_v }}`
+          - `ghcr.io/${{ github.repository }}:latest`
+
+          ## Usage
+          ```bash
+          docker run -p 8080:8080 \
+            -e HA_URL="http://your-homeassistant:8123" \
+            -e HA_TOKEN="your_token" \
+            ghcr.io/${{ github.repository }}:${{ steps.semver.outputs.version_no_v }}
+          ```
+
+          ## Docker Compose
+          ```yaml
+          services:
+            zyxel-to-mqtt:
+              image: ghcr.io/${{ github.repository }}:${{ steps.semver.outputs.version_no_v }}
+              ports:
+                - "8080:8080"
+              environment:
+                - HA_URL=http://your-homeassistant:8123
+                - HA_TOKEN=your_token
+          ```
+        draft: false
+        prerelease: false
+
+  build-pr:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      packages: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=pr
+          type=sha,prefix=pr-${{ github.event.number }}-
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
