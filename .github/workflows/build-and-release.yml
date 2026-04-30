@@ -154,25 +154,6 @@ jobs:
           - `ghcr.io/${{ github.repository }}:${{ steps.semver.outputs.version_no_v }}`
           - `ghcr.io/${{ github.repository }}:latest`
 
-          ## Usage
-          ```bash
-          docker run -p 8080:8080 \
-            -e HA_URL="http://your-homeassistant:8123" \
-            -e HA_TOKEN="your_token" \
-            ghcr.io/${{ github.repository }}:${{ steps.semver.outputs.version_no_v }}
-          ```
-
-          ## Docker Compose
-          ```yaml
-          services:
-            zyxel-to-mqtt:
-              image: ghcr.io/${{ github.repository }}:${{ steps.semver.outputs.version_no_v }}
-              ports:
-                - "8080:8080"
-              environment:
-                - HA_URL=http://your-homeassistant:8123
-                - HA_TOKEN=your_token
-          ```
         draft: false
         prerelease: false
 
