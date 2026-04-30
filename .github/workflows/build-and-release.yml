@@ -55,9 +55,10 @@ jobs:
     - name: Generate semantic version
       id: semver
       run: |
-        # Get the latest tag
+        # Get the latest tag globally (not just in ancestry of HEAD)
         git fetch --tags
-        LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+        LATEST_TAG=$(git tag -l 'v*' | sort -V | tail -1)
+        LATEST_TAG=${LATEST_TAG:-v0.0.0}
         echo "Latest tag: $LATEST_TAG"
 
         # Extract version numbers
@@ -93,10 +94,14 @@ jobs:
       run: |
         echo "Creating tag: ${{ steps.semver.outputs.version }}"
         echo "Version without v: ${{ steps.semver.outputs.version_no_v }}"
-        git config user.name "github-actions[bot]"
-        git config user.email "github-actions[bot]@users.noreply.github.com"
-        git tag ${{ steps.semver.outputs.version }}
-        git push origin ${{ steps.semver.outputs.version }}
+        if git rev-parse "${{ steps.semver.outputs.version }}" >/dev/null 2>&1; then
+          echo "Tag ${{ steps.semver.outputs.version }} already exists, skipping"
+        else
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag ${{ steps.semver.outputs.version }}
+          git push origin ${{ steps.semver.outputs.version }}
+        fi
 
     - name: Log in to Container Registry
       uses: docker/login-action@v3
