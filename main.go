@@ -62,8 +62,7 @@ func main() {
 		log.Fatalf("mqtt: %v", err)
 	}
 
-	c := cron.New()
-	if _, err := c.AddFunc(cfg.CronSchedule, func() {
+	collect := func() {
 		data, err := Fetch(cfg.Zyxel)
 		if err != nil {
 			log.Printf("fetch error: %v", err)
@@ -73,7 +72,12 @@ func main() {
 		if err := Publish(mc, data); err != nil {
 			log.Printf("publish error: %v", err)
 		}
-	}); err != nil {
+	}
+
+	go collect()
+
+	c := cron.New()
+	if _, err := c.AddFunc(cfg.CronSchedule, collect); err != nil {
 		log.Fatalf("cron: %v", err)
 	}
 	c.Start()
