@@ -75,8 +75,17 @@ func Connect(cfg MQTTConfig) (*mqttClient, error) {
 
 func Publish(mc *mqttClient, data *SwitchData) error {
 	mc.mu.Lock()
+	var prevPorts int
+	if mc.last != nil {
+		prevPorts = len(mc.last.Ports)
+	}
 	mc.last = data
 	mc.mu.Unlock()
+
+	// publish discovery when port count changes (includes first run: 0 → N)
+	if prevPorts != len(data.Ports) {
+		publishDiscovery(mc.c, data)
+	}
 
 	states := map[string]string{
 		"total_power":       fmt.Sprintf("%.1f", data.TotalPower),
