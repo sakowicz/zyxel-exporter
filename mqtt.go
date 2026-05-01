@@ -31,13 +31,14 @@ type haDevice struct {
 }
 
 type haConfig struct {
-	Name              string   `json:"name"`
-	UniqueID          string   `json:"unique_id"`
-	StateTopic        string   `json:"state_topic"`
-	UnitOfMeasurement string   `json:"unit_of_measurement"`
-	DeviceClass       string   `json:"device_class,omitempty"`
-	StateClass        string   `json:"state_class"`
-	Device            haDevice `json:"device"`
+	Name                     string   `json:"name"`
+	UniqueID                 string   `json:"unique_id"`
+	StateTopic               string   `json:"state_topic"`
+	UnitOfMeasurement        string   `json:"unit_of_measurement"`
+	DeviceClass              string   `json:"device_class,omitempty"`
+	StateClass               string   `json:"state_class"`
+	SuggestedDisplayPrecision int     `json:"suggested_display_precision"`
+	Device                   haDevice `json:"device"`
 }
 
 var device = haDevice{
@@ -109,40 +110,42 @@ func Publish(mc *mqttClient, data *SwitchData) error {
 
 func publishDiscovery(c paho.Client, data *SwitchData) {
 	static := []struct {
-		id    string
-		name  string
-		unit  string
-		class string
+		id        string
+		name      string
+		unit      string
+		class     string
+		precision int
 	}{
-		{"total_power", "Total Power", "W", "power"},
-		{"consuming_power", "Consuming Power", "W", "power"},
-		{"remaining_power", "Remaining Power", "W", "power"},
-		{"poe_usage_percent", "PoE Usage", "%", ""},
-		{"junction_temp", "Junction Temperature", "°C", "temperature"},
+		{"total_power", "Total Power", "W", "power", 1},
+		{"consuming_power", "Consuming Power", "W", "power", 1},
+		{"remaining_power", "Remaining Power", "W", "power", 1},
+		{"poe_usage_percent", "PoE Usage", "%", "", 0},
+		{"junction_temp", "Junction Temperature", "°C", "temperature", 0},
 	}
 
 	for _, s := range static {
-		publishSensorConfig(c, s.id, s.name, s.unit, s.class)
+		publishSensorConfig(c, s.id, s.name, s.unit, s.class, s.precision)
 	}
 
 	if data != nil {
 		for _, p := range data.Ports {
 			id := fmt.Sprintf("port_%d_power", p.Port)
 			name := fmt.Sprintf("Port %d Power", p.Port)
-			publishSensorConfig(c, id, name, "W", "power")
+			publishSensorConfig(c, id, name, "W", "power", 1)
 		}
 	}
 }
 
-func publishSensorConfig(c paho.Client, id, name, unit, class string) {
+func publishSensorConfig(c paho.Client, id, name, unit, class string, precision int) {
 	cfg := haConfig{
-		Name:              name,
-		UniqueID:          "zyxel_poe_" + id,
-		StateTopic:        fmt.Sprintf("zyxel/sensor/%s/state", id),
-		UnitOfMeasurement: unit,
-		DeviceClass:       class,
-		StateClass:        "measurement",
-		Device:            device,
+		Name:                      name,
+		UniqueID:                  "zyxel_poe_" + id,
+		StateTopic:                fmt.Sprintf("zyxel/sensor/%s/state", id),
+		UnitOfMeasurement:         unit,
+		DeviceClass:               class,
+		StateClass:                "measurement",
+		SuggestedDisplayPrecision: precision,
+		Device:                    device,
 	}
 	payload, err := json.Marshal(cfg)
 	if err != nil {
