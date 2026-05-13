@@ -58,7 +58,7 @@ func Connect(cfg MQTTConfig, info *SystemInfo, switchHost string) (*mqttClient, 
 
 	opts := paho.NewClientOptions().
 		AddBroker(fmt.Sprintf("tcp://%s:%d", cfg.Host, cfg.Port)).
-		SetClientID("zyxel-poe-bridge-" + mc.slug).
+		SetClientID("zyxel-exporter-" + mc.slug).
 		SetUsername(cfg.Username).
 		SetPassword(cfg.Password).
 		SetAutoReconnect(true).

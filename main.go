@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"syscall"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/robfig/cron/v3"
 )
 
@@ -15,6 +16,7 @@ type Config struct {
 	Zyxel        ZyxelConfig
 	MQTT         MQTTConfig
 	CronSchedule string
+	ListenAddr   string
 }
 
 func loadConfig() Config {
@@ -38,6 +40,11 @@ func loadConfig() Config {
 		schedule = "* * * * *"
 	}
 
+	listen := os.Getenv("HTTP_LISTEN")
+	if listen == "" {
+		listen = ":8080"
+	}
+
 	return Config{
 		Zyxel: ZyxelConfig{
 			Host:     required("ZYXEL_DEVICE_IP"),
@@ -45,17 +52,20 @@ func loadConfig() Config {
 			Password: required("ZYXEL_DEVICE_PASSWORD"),
 		},
 		MQTT: MQTTConfig{
-			Host:     required("MQTT_BROKER_HOST"),
+			Host:     os.Getenv("MQTT_BROKER_HOST"),
 			Port:     port,
 			Username: os.Getenv("MQTT_BROKER_USERNAME"),
 			Password: os.Getenv("MQTT_BROKER_PASSWORD"),
 		},
 		CronSchedule: schedule,
+		ListenAddr:   listen,
 	}
 }
 
 func main() {
 	cfg := loadConfig()
+
+	RegisterMetrics()
 
 	info, err := FetchSystemInfo(cfg.Zyxel)
 	if err != nil {
@@ -64,10 +74,16 @@ func main() {
 		log.Printf("switch: model=%q name=%q mac=%s serial=%s fw=%s hw=%s",
 			info.Model, info.SystemName, info.MAC, info.SerialNumber, info.FirmwareVersion, info.HardwareVersion)
 	}
+	SetSystemInfo(info)
 
-	mc, err := Connect(cfg.MQTT, info, cfg.Zyxel.Host)
-	if err != nil {
-		log.Fatalf("mqtt: %v", err)
+	var mc *mqttClient
+	if cfg.MQTT.Host != "" {
+		mc, err = Connect(cfg.MQTT, info, cfg.Zyxel.Host)
+		if err != nil {
+			log.Fatalf("mqtt: %v", err)
+		}
+	} else {
+		log.Println("MQTT disabled (MQTT_BROKER_HOST not set)")
 	}
 
 	collect := func() {
@@ -76,9 +92,13 @@ func main() {
 			log.Printf("fetch error: %v", err)
 			return
 		}
-		log.Printf("consuming=%.1fW total=%.1fW ports=%d", data.ConsumingPower, data.TotalPower, len(data.Ports))
-		if err := Publish(mc, data); err != nil {
-			log.Printf("publish error: %v", err)
+		log.Printf("consuming=%.1fW total=%.1fW ports=%d cpu=%.2f%% mem=%d%%",
+			data.ConsumingPower, data.TotalPower, len(data.Ports), data.CPUUsagePercent, data.MemoryUsagePercent)
+		UpdateMetrics(data)
+		if mc != nil {
+			if err := Publish(mc, data); err != nil {
+				log.Printf("publish error: %v", err)
+			}
 		}
 	}
 
@@ -90,6 +110,7 @@ func main() {
 	}
 	c.Start()
 
+	http.Handle("/metrics", promhttp.Handler())
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
@@ -101,12 +122,14 @@ func main() {
 		<-sig
 		log.Println("shutting down")
 		c.Stop()
-		mc.c.Disconnect(250)
+		if mc != nil {
+			mc.c.Disconnect(250)
+		}
 		os.Exit(0)
 	}()
 
-	log.Printf("started, schedule=%q", cfg.CronSchedule)
-	if err := http.ListenAndServe(":8080", nil); err != nil {
+	log.Printf("started, schedule=%q listen=%s", cfg.CronSchedule, cfg.ListenAddr)
+	if err := http.ListenAndServe(cfg.ListenAddr, nil); err != nil {
 		log.Fatalf("http: %v", err)
 	}
 }

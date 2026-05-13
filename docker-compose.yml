@@ -1,17 +1,18 @@
 version: '3.8'
 
 services:
-  zyxel-to-mqtt:
+  zyxel-exporter:
     build: .
     ports:
       - "8080:8080"
     environment:
-      - MQTT_BROKER_HOST=mqtt
-      - MQTT_BROKER_PORT=1883
-      - MQTT_BROKER_USERNAME=zyxel
-      - MQTT_BROKER_PASSWORD=zyxel
       - ZYXEL_DEVICE_IP=192.168.1.254
       - ZYXEL_DEVICE_USERNAME=read
       - ZYXEL_DEVICE_PASSWORD=pass
       - CRON_SCHEDULE=* * * * *
+      # MQTT is optional. Leave MQTT_BROKER_HOST unset to expose Prometheus only.
+      # - MQTT_BROKER_HOST=mqtt
+      # - MQTT_BROKER_PORT=1883
+      # - MQTT_BROKER_USERNAME=zyxel
+      # - MQTT_BROKER_PASSWORD=zyxel
     restart: unless-stopped

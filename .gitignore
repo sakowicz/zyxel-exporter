@@ -4,7 +4,7 @@
 *.dll
 *.so
 *.dylib
-zyxel-to-mqtt
+zyxel-exporter
 
 # Test binary, built with `go test -c`
 *.test

@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.21-alpine AS builder
+FROM golang:1.23-alpine AS builder
 
 WORKDIR /app
 
@@ -13,7 +13,7 @@ RUN go mod download
 COPY . .
 
 # Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o zyxel-to-mqtt .
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o zyxel-exporter .
 
 # Final stage
 FROM alpine:latest
@@ -25,11 +25,11 @@ RUN apk --no-cache add ca-certificates && \
 WORKDIR /app
 
 # Copy the binary from builder stage
-COPY --from=builder /app/zyxel-to-mqtt /app/zyxel-to-mqtt
+COPY --from=builder /app/zyxel-exporter /app/zyxel-exporter
 
 USER zyxel
 
-# Expose port
+# Expose port (HTTP: /metrics, /health)
 EXPOSE 8080
 
 # Health check
@@ -37,4 +37,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
 
 # Run the binary
-CMD ["/app/zyxel-to-mqtt"]
+CMD ["/app/zyxel-exporter"]
