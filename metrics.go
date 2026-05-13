@@ -52,6 +52,39 @@ var (
 		Name: "zyxel_poe_port_watts",
 		Help: "Per-port PoE power consumption in watts.",
 	}, []string{"port"})
+
+	metricPortLinkUp = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "zyxel_port_link_up",
+		Help: "Port link state (1 = up, 0 = down).",
+	}, []string{"port"})
+	metricPortSpeed = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "zyxel_port_speed_mbps",
+		Help: "Negotiated link speed in megabits per second (0 when down).",
+	}, []string{"port"})
+	metricPortUptime = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "zyxel_port_uptime_seconds",
+		Help: "Seconds since the port last came up.",
+	}, []string{"port"})
+	metricPortTxBps = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "zyxel_port_tx_bytes_per_second",
+		Help: "Transmit rate in bytes/sec as sampled by the switch.",
+	}, []string{"port"})
+	metricPortRxBps = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "zyxel_port_rx_bytes_per_second",
+		Help: "Receive rate in bytes/sec as sampled by the switch.",
+	}, []string{"port"})
+	metricPortTxUtil = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "zyxel_port_tx_utilization_percent",
+		Help: "Transmit link utilization 0-100.",
+	}, []string{"port"})
+	metricPortRxUtil = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "zyxel_port_rx_utilization_percent",
+		Help: "Receive link utilization 0-100.",
+	}, []string{"port"})
+	metricMacCount = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "zyxel_mac_count",
+		Help: "Total MAC addresses learned by the switch.",
+	})
 )
 
 func RegisterMetrics() {
@@ -67,6 +100,14 @@ func RegisterMetrics() {
 		metricMemoryUsed,
 		metricMemoryUsage,
 		metricPortPower,
+		metricPortLinkUp,
+		metricPortSpeed,
+		metricPortUptime,
+		metricPortTxBps,
+		metricPortRxBps,
+		metricPortTxUtil,
+		metricPortRxUtil,
+		metricMacCount,
 	)
 }
 
@@ -98,5 +139,29 @@ func UpdateMetrics(data *SwitchData) {
 	metricPortPower.Reset()
 	for _, p := range data.Ports {
 		metricPortPower.WithLabelValues(strconv.Itoa(p.Port)).Set(p.Consumption)
+	}
+
+	metricMacCount.Set(float64(data.MacCount))
+
+	metricPortLinkUp.Reset()
+	metricPortSpeed.Reset()
+	metricPortUptime.Reset()
+	metricPortTxBps.Reset()
+	metricPortRxBps.Reset()
+	metricPortTxUtil.Reset()
+	metricPortRxUtil.Reset()
+	for _, iface := range data.Interfaces {
+		port := strconv.Itoa(iface.Port)
+		up := 0.0
+		if iface.LinkUp {
+			up = 1
+		}
+		metricPortLinkUp.WithLabelValues(port).Set(up)
+		metricPortSpeed.WithLabelValues(port).Set(float64(iface.LinkSpeedMbps))
+		metricPortUptime.WithLabelValues(port).Set(float64(iface.UptimeSeconds))
+		metricPortTxBps.WithLabelValues(port).Set(iface.TxKBps * 1024)
+		metricPortRxBps.WithLabelValues(port).Set(iface.RxKBps * 1024)
+		metricPortTxUtil.WithLabelValues(port).Set(iface.TxUtilPercent)
+		metricPortRxUtil.WithLabelValues(port).Set(iface.RxUtilPercent)
 	}
 }

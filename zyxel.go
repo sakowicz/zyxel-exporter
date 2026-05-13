@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +24,18 @@ type PortData struct {
 	Consumption float64
 }
 
+type InterfaceData struct {
+	Port          int
+	LinkUp        bool
+	LinkSpeedMbps int
+	State         string
+	UptimeSeconds int64
+	TxKBps        float64
+	RxKBps        float64
+	TxUtilPercent float64
+	RxUtilPercent float64
+}
+
 type SwitchData struct {
 	TotalPower        float64
 	ConsumingPower    float64
@@ -34,6 +47,8 @@ type SwitchData struct {
 	MemoryTotalBytes  int64
 	MemoryUsedBytes   int64
 	MemoryUsagePercent int
+	Interfaces        []InterfaceData
+	MacCount          int
 }
 
 type SystemInfo struct {
@@ -55,6 +70,9 @@ var (
 	rePortHeader     = regexp.MustCompile(`Port\s+State\s+PD`)
 	reMemory         = regexp.MustCompile(`common\s+(\d+)\(B\)\s+(\d+)\(B\)\s+(\d+)\(%\)`)
 	reCPUUsage       = regexp.MustCompile(`CPU usage status:\s*([\d.]+)\s*%`)
+	reIfaceStatus    = regexp.MustCompile(`^\s+(\d+)(?:\s+\S+)?\s+(Down|[\d.]+[MG]/F)\s+(STOP|FORWARDING)\s+\S+\s+(\d+):(\d+):(\d+)`)
+	reIfaceUtil      = regexp.MustCompile(`^\s+(\d+)\s+(?:Down|[\d.]+[MG]/F)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)`)
+	reMacCount       = regexp.MustCompile(`No\s*:\s*(\d+)`)
 
 	reModel     = regexp.MustCompile(`Product Model\s*:\s*(.+)`)
 	reSysName   = regexp.MustCompile(`System Name\s*:\s*(.+)`)
@@ -65,11 +83,35 @@ var (
 )
 
 func Fetch(cfg ZyxelConfig) (*SwitchData, error) {
-	out, err := runCommand(cfg, "show pwr\nshow memory\nshow cpu-utilization")
+	out, err := runCommand(cfg, "show pwr\nshow memory\nshow cpu-utilization\nshow interfaces status\nshow interfaces utilization\nshow mac-count")
 	if err != nil {
 		return nil, err
 	}
 	return parse(out), nil
+}
+
+func parseLinkSpeed(s string) int {
+	if s == "Down" {
+		return 0
+	}
+	if idx := strings.Index(s, "/"); idx >= 0 {
+		s = s[:idx]
+	}
+	if len(s) == 0 {
+		return 0
+	}
+	unit := s[len(s)-1]
+	val, err := strconv.ParseFloat(s[:len(s)-1], 64)
+	if err != nil {
+		return 0
+	}
+	switch unit {
+	case 'G':
+		return int(val * 1000)
+	case 'M':
+		return int(val)
+	}
+	return 0
 }
 
 func FetchSystemInfo(cfg ZyxelConfig) (*SystemInfo, error) {
@@ -155,6 +197,15 @@ func runCommand(cfg ZyxelConfig, cmd string) (string, error) {
 func parse(output string) *SwitchData {
 	data := &SwitchData{}
 	inPortTable := false
+	ifaceMap := make(map[int]*InterfaceData)
+	getIface := func(port int) *InterfaceData {
+		if iface, ok := ifaceMap[port]; ok {
+			return iface
+		}
+		iface := &InterfaceData{Port: port}
+		ifaceMap[port] = iface
+		return iface
+	}
 
 	for _, line := range strings.Split(output, "\n") {
 		if m := reTotalPower.FindStringSubmatch(line); m != nil {
@@ -180,6 +231,29 @@ func parse(output string) *SwitchData {
 		if m := reCPUUsage.FindStringSubmatch(line); m != nil {
 			data.CPUUsagePercent, _ = strconv.ParseFloat(m[1], 64)
 		}
+		if m := reMacCount.FindStringSubmatch(line); m != nil {
+			data.MacCount, _ = strconv.Atoi(m[1])
+		}
+		if m := reIfaceStatus.FindStringSubmatch(line); m != nil {
+			port, _ := strconv.Atoi(m[1])
+			iface := getIface(port)
+			link := m[2]
+			iface.LinkUp = link != "Down"
+			iface.LinkSpeedMbps = parseLinkSpeed(link)
+			iface.State = m[3]
+			h, _ := strconv.ParseInt(m[4], 10, 64)
+			mi, _ := strconv.ParseInt(m[5], 10, 64)
+			s, _ := strconv.ParseInt(m[6], 10, 64)
+			iface.UptimeSeconds = h*3600 + mi*60 + s
+		}
+		if m := reIfaceUtil.FindStringSubmatch(line); m != nil {
+			port, _ := strconv.Atoi(m[1])
+			iface := getIface(port)
+			iface.TxKBps, _ = strconv.ParseFloat(m[2], 64)
+			iface.TxUtilPercent, _ = strconv.ParseFloat(m[3], 64)
+			iface.RxKBps, _ = strconv.ParseFloat(m[4], 64)
+			iface.RxUtilPercent, _ = strconv.ParseFloat(m[5], 64)
+		}
 
 		if rePortHeader.MatchString(line) {
 			inPortTable = true
@@ -196,6 +270,15 @@ func parse(output string) *SwitchData {
 				})
 			}
 		}
+	}
+
+	ports := make([]int, 0, len(ifaceMap))
+	for p := range ifaceMap {
+		ports = append(ports, p)
+	}
+	sort.Ints(ports)
+	for _, p := range ports {
+		data.Interfaces = append(data.Interfaces, *ifaceMap[p])
 	}
 
 	return data

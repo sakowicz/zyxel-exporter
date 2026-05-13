@@ -11,8 +11,13 @@ For the switch as a whole:
 - Junction Temperature (°C)
 - CPU Usage (%)
 - Memory Total / Used (bytes) and Memory Usage (%)
+- Learned MAC address count
 
-Plus per-port power draw in watts for every PoE port reported by `show pwr`.
+Per-port:
+
+- PoE power draw (W)
+- Link up/down, negotiated speed (Mbps), port uptime (s)
+- Tx/Rx rate (bytes/sec) and Tx/Rx link utilization (%)
 
 ## Endpoints
 
@@ -25,7 +30,7 @@ Both listen on `:8080` by default (override with `HTTP_LISTEN`).
 
 ## Requirements
 
-- A Zyxel PoE switch with SSH enabled and a user with **privilege level 3 or higher** so it can run `show pwr`, `show system-information`, `show memory` and `show cpu-utilization`. Tested on the **Zyxel XMG1915-10EP**, but should work on any Zyxel PoE switch that exposes SSH and these commands.
+- A Zyxel PoE switch with SSH enabled and a user with **privilege level 3 or higher** so it can run `show pwr`, `show system-information`, `show memory`, `show cpu-utilization`, `show interfaces status`, `show interfaces utilization` and `show mac-count`. Tested on the **Zyxel XMG1915-10EP**, but should work on any Zyxel PoE switch that exposes SSH and these commands.
 - Prometheus (or any scraper compatible with the OpenMetrics text format).
 - Optional: an MQTT broker + Home Assistant if you want HA auto-discovery.
 
@@ -64,6 +69,14 @@ Exposed metrics (prefixed `zyxel_`):
 | `zyxel_memory_total_bytes` | gauge | — | Total RAM |
 | `zyxel_memory_used_bytes` | gauge | — | Used RAM |
 | `zyxel_memory_usage_percent` | gauge | — | RAM usage % (0–100) |
+| `zyxel_port_link_up` | gauge | `port` | 1 if link is up, 0 if down |
+| `zyxel_port_speed_mbps` | gauge | `port` | Negotiated speed in Mbps (0 when down) |
+| `zyxel_port_uptime_seconds` | gauge | `port` | Seconds since the port last came up |
+| `zyxel_port_tx_bytes_per_second` | gauge | `port` | Transmit rate (bytes/sec, sampled) |
+| `zyxel_port_rx_bytes_per_second` | gauge | `port` | Receive rate (bytes/sec, sampled) |
+| `zyxel_port_tx_utilization_percent` | gauge | `port` | Tx link utilization (0–100) |
+| `zyxel_port_rx_utilization_percent` | gauge | `port` | Rx link utilization (0–100) |
+| `zyxel_mac_count` | gauge | — | Total MAC addresses learned by the switch |
 
 Example Prometheus scrape config:
 
