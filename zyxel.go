@@ -85,11 +85,37 @@ var (
 )
 
 func Fetch(cfg ZyxelConfig) (*SwitchData, error) {
-	out, err := runCommand(cfg, "show pwr\nshow memory\nshow cpu-utilization\nshow interfaces status\nshow interfaces utilization\nshow mac-count")
-	if err != nil {
-		return nil, err
+	// Each command runs in its own SSH session so they don't influence each
+	// other's measurements (notably: show cpu-utilization, which reports a
+	// rolling average over the last ~60 seconds and would otherwise capture
+	// the CPU spike caused by sibling commands in the same session).
+	// cpu-utilization runs first so it observes the switch in its idlest state.
+	commands := []string{
+		"show cpu-utilization",
+		"show pwr",
+		"show memory",
+		"show interfaces status",
+		"show interfaces utilization",
+		"show mac-count",
 	}
-	return parse(out), nil
+
+	var combined strings.Builder
+	var anySuccess bool
+	for _, cmd := range commands {
+		out, err := runCommand(cfg, cmd)
+		if err != nil {
+			log.Printf("command %q failed: %v", cmd, err)
+			continue
+		}
+		anySuccess = true
+		combined.WriteString(out)
+		combined.WriteString("\n")
+	}
+	if !anySuccess {
+		return nil, fmt.Errorf("all switch commands failed")
+	}
+
+	return parse(combined.String()), nil
 }
 
 func parseLinkSpeed(s string) int {
