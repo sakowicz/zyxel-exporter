@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 
 	paho "github.com/eclipse/paho.mqtt.golang"
@@ -17,43 +18,47 @@ type MQTTConfig struct {
 }
 
 type mqttClient struct {
-	c    paho.Client
-	cfg  MQTTConfig
-	mu   sync.Mutex
-	last *SwitchData
+	c      paho.Client
+	cfg    MQTTConfig
+	device haDevice
+	slug   string
+	mu     sync.Mutex
+	last   *SwitchData
 }
 
 type haDevice struct {
-	Identifiers  []string `json:"identifiers"`
-	Name         string   `json:"name"`
-	Model        string   `json:"model"`
-	Manufacturer string   `json:"manufacturer"`
+	Identifiers      []string   `json:"identifiers"`
+	Connections      [][]string `json:"connections,omitempty"`
+	Name             string     `json:"name"`
+	Model            string     `json:"model"`
+	Manufacturer     string     `json:"manufacturer"`
+	SwVersion        string     `json:"sw_version,omitempty"`
+	HwVersion        string     `json:"hw_version,omitempty"`
+	SerialNumber    string     `json:"serial_number,omitempty"`
+	ConfigurationURL string     `json:"configuration_url,omitempty"`
 }
 
 type haConfig struct {
-	Name                     string   `json:"name"`
-	UniqueID                 string   `json:"unique_id"`
-	StateTopic               string   `json:"state_topic"`
-	UnitOfMeasurement        string   `json:"unit_of_measurement"`
-	DeviceClass              string   `json:"device_class,omitempty"`
-	StateClass               string   `json:"state_class"`
-	SuggestedDisplayPrecision int     `json:"suggested_display_precision"`
-	Device                   haDevice `json:"device"`
+	Name                      string   `json:"name"`
+	UniqueID                  string   `json:"unique_id"`
+	StateTopic                string   `json:"state_topic"`
+	UnitOfMeasurement         string   `json:"unit_of_measurement"`
+	DeviceClass               string   `json:"device_class,omitempty"`
+	StateClass                string   `json:"state_class"`
+	SuggestedDisplayPrecision int      `json:"suggested_display_precision"`
+	Device                    haDevice `json:"device"`
 }
 
-var device = haDevice{
-	Identifiers:  []string{"zyxel_poe_switch"},
-	Name:         "Zyxel PoE Switch",
-	Model:        "Zyxel PoE",
-	Manufacturer: "Zyxel",
-}
-
-func Connect(cfg MQTTConfig) (*mqttClient, error) {
-	mc := &mqttClient{cfg: cfg}
+func Connect(cfg MQTTConfig, info *SystemInfo, switchHost string) (*mqttClient, error) {
+	mc := &mqttClient{
+		cfg:    cfg,
+		device: buildDevice(info, switchHost),
+		slug:   deviceSlug(info),
+	}
 
 	opts := paho.NewClientOptions().
 		AddBroker(fmt.Sprintf("tcp://%s:%d", cfg.Host, cfg.Port)).
-		SetClientID("zyxel-poe-bridge").
+		SetClientID("zyxel-poe-bridge-" + mc.slug).
 		SetUsername(cfg.Username).
 		SetPassword(cfg.Password).
 		SetAutoReconnect(true).
@@ -63,7 +68,7 @@ func Connect(cfg MQTTConfig) (*mqttClient, error) {
 			mc.mu.Lock()
 			last := mc.last
 			mc.mu.Unlock()
-			publishDiscovery(mc.c, last)
+			mc.publishDiscovery(last)
 		})
 
 	mc.c = paho.NewClient(opts)
@@ -72,6 +77,64 @@ func Connect(cfg MQTTConfig) (*mqttClient, error) {
 	}
 
 	return mc, nil
+}
+
+func buildDevice(info *SystemInfo, switchHost string) haDevice {
+	d := haDevice{
+		Manufacturer:     "Zyxel",
+		Model:            "Zyxel PoE",
+		Name:             "Zyxel PoE Switch",
+		Identifiers:      []string{"zyxel_poe_switch"},
+		ConfigurationURL: fmt.Sprintf("http://%s", switchHost),
+	}
+	if info == nil {
+		return d
+	}
+	if info.SerialNumber != "" {
+		d.Identifiers = []string{"zyxel_poe_" + info.SerialNumber}
+		d.SerialNumber = info.SerialNumber
+	}
+	if info.MAC != "" {
+		d.Connections = [][]string{{"mac", info.MAC}}
+	}
+	if info.Model != "" {
+		d.Model = info.Model
+	}
+	if info.FirmwareVersion != "" {
+		d.SwVersion = info.FirmwareVersion
+	}
+	if info.HardwareVersion != "" {
+		d.HwVersion = info.HardwareVersion
+	}
+	switch {
+	case info.SystemName != "":
+		d.Name = info.SystemName
+	case info.Model != "":
+		d.Name = "Zyxel " + info.Model
+	}
+	return d
+}
+
+func deviceSlug(info *SystemInfo) string {
+	if info != nil && info.SerialNumber != "" {
+		return strings.ToLower(info.SerialNumber)
+	}
+	if info != nil && info.MAC != "" {
+		return strings.ReplaceAll(strings.ToLower(info.MAC), ":", "")
+	}
+	return "switch"
+}
+
+func (mc *mqttClient) stateTopic(id string) string {
+	return fmt.Sprintf("zyxel/%s/%s/state", mc.slug, id)
+}
+
+func (mc *mqttClient) discoveryTopic(id string) string {
+	return fmt.Sprintf("homeassistant/sensor/zyxel_poe_%s/%s/config", mc.slug, id)
+}
+
+func (mc *mqttClient) uniqueID(id string) string {
+	return fmt.Sprintf("zyxel_poe_%s_%s", mc.slug, id)
 }
 
 func Publish(mc *mqttClient, data *SwitchData) error {
@@ -85,7 +148,7 @@ func Publish(mc *mqttClient, data *SwitchData) error {
 
 	// publish discovery when port count changes (includes first run: 0 → N)
 	if prevPorts != len(data.Ports) {
-		publishDiscovery(mc.c, data)
+		mc.publishDiscovery(data)
 	}
 
 	states := map[string]string{
@@ -100,7 +163,7 @@ func Publish(mc *mqttClient, data *SwitchData) error {
 	}
 
 	for id, val := range states {
-		topic := fmt.Sprintf("zyxel/sensor/%s/state", id)
+		topic := mc.stateTopic(id)
 		if tok := mc.c.Publish(topic, 0, false, val); tok.Wait() && tok.Error() != nil {
 			return fmt.Errorf("publish %s: %w", topic, tok.Error())
 		}
@@ -108,7 +171,7 @@ func Publish(mc *mqttClient, data *SwitchData) error {
 	return nil
 }
 
-func publishDiscovery(c paho.Client, data *SwitchData) {
+func (mc *mqttClient) publishDiscovery(data *SwitchData) {
 	static := []struct {
 		id        string
 		name      string
@@ -124,36 +187,36 @@ func publishDiscovery(c paho.Client, data *SwitchData) {
 	}
 
 	for _, s := range static {
-		publishSensorConfig(c, s.id, s.name, s.unit, s.class, s.precision)
+		mc.publishSensorConfig(s.id, s.name, s.unit, s.class, s.precision)
 	}
 
 	if data != nil {
 		for _, p := range data.Ports {
 			id := fmt.Sprintf("port_%d_power", p.Port)
 			name := fmt.Sprintf("Port %d Power", p.Port)
-			publishSensorConfig(c, id, name, "W", "power", 1)
+			mc.publishSensorConfig(id, name, "W", "power", 1)
 		}
 	}
 }
 
-func publishSensorConfig(c paho.Client, id, name, unit, class string, precision int) {
+func (mc *mqttClient) publishSensorConfig(id, name, unit, class string, precision int) {
 	cfg := haConfig{
 		Name:                      name,
-		UniqueID:                  "zyxel_poe_" + id,
-		StateTopic:                fmt.Sprintf("zyxel/sensor/%s/state", id),
+		UniqueID:                  mc.uniqueID(id),
+		StateTopic:                mc.stateTopic(id),
 		UnitOfMeasurement:         unit,
 		DeviceClass:               class,
 		StateClass:                "measurement",
 		SuggestedDisplayPrecision: precision,
-		Device:                    device,
+		Device:                    mc.device,
 	}
 	payload, err := json.Marshal(cfg)
 	if err != nil {
 		log.Printf("marshal discovery %s: %v", id, err)
 		return
 	}
-	topic := fmt.Sprintf("homeassistant/sensor/zyxel_poe/%s/config", id)
-	if tok := c.Publish(topic, 1, true, payload); tok.Wait() && tok.Error() != nil {
+	topic := mc.discoveryTopic(id)
+	if tok := mc.c.Publish(topic, 1, true, payload); tok.Wait() && tok.Error() != nil {
 		log.Printf("publish discovery %s: %v", id, tok.Error())
 	}
 }

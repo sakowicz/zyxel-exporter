@@ -57,7 +57,15 @@ func loadConfig() Config {
 func main() {
 	cfg := loadConfig()
 
-	mc, err := Connect(cfg.MQTT)
+	info, err := FetchSystemInfo(cfg.Zyxel)
+	if err != nil {
+		log.Printf("system-information fetch failed (continuing with generic device): %v", err)
+	} else {
+		log.Printf("switch: model=%q name=%q mac=%s serial=%s fw=%s hw=%s",
+			info.Model, info.SystemName, info.MAC, info.SerialNumber, info.FirmwareVersion, info.HardwareVersion)
+	}
+
+	mc, err := Connect(cfg.MQTT, info, cfg.Zyxel.Host)
 	if err != nil {
 		log.Fatalf("mqtt: %v", err)
 	}

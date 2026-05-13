@@ -14,11 +14,23 @@ For the switch as a whole:
 
 Plus per-port power draw in watts for every PoE port reported by `show pwr`.
 
-Each metric is published as a Home Assistant sensor under a single device named **Zyxel PoE Switch**, so it appears automatically in HA if MQTT discovery is enabled.
+Each metric is published as a Home Assistant sensor under a single MQTT device, so it appears automatically in HA if MQTT discovery is enabled.
+
+On startup the service also runs `show system-information` and uses the result to populate the HA device block per the [MQTT discovery spec](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery):
+
+- `name` — the switch's configured System Name (falls back to `Zyxel <Model>`)
+- `model` — e.g. `XMG1915-10EP`
+- `manufacturer` — `Zyxel`
+- `connections` — `[["mac", "<ethernet address>"]]`
+- `serial_number` — switch serial
+- `identifiers` — derived from the serial number, so multiple switches don't collide
+- `sw_version` — ZyNOS firmware version
+- `hw_version` — hardware revision
+- `configuration_url` — `http://<switch ip>` (links from the HA device page to the web UI)
 
 ## Requirements
 
-- A Zyxel PoE switch with SSH enabled and a user with **privilege level 3 or higher** so it can run `show pwr`. Tested on the **Zyxel XMG1915-10EP**, but should work on any Zyxel PoE switch that exposes SSH and the `show pwr` command.
+- A Zyxel PoE switch with SSH enabled and a user with **privilege level 3 or higher** so it can run `show pwr` and `show system-information`. Tested on the **Zyxel XMG1915-10EP**, but should work on any Zyxel PoE switch that exposes SSH and those two commands.
 - An MQTT broker reachable from the container
 - Home Assistant with the MQTT integration (optional — discovery is published to the `homeassistant/` prefix)
 
@@ -70,10 +82,12 @@ MQTT_BROKER_HOST=192.168.1.10 \
 
 ## MQTT topics
 
-- State: `zyxel/sensor/<metric_id>/state` (e.g. `zyxel/sensor/total_power/state`, `zyxel/sensor/port_1_power/state`)
-- Discovery: `homeassistant/sensor/zyxel_poe/<metric_id>/config` (retained)
+Topics are namespaced by a device **slug** — the switch's serial number (lowercased), or its MAC if the serial isn't readable, or `switch` as a final fallback. This means multiple instances on the same broker won't collide.
 
-Discovery is re-published on connect and whenever the number of detected ports changes.
+- State: `zyxel/<slug>/<metric_id>/state` — e.g. `zyxel/s252l23001041/total_power/state`, `zyxel/s252l23001041/port_1_power/state`
+- Discovery: `homeassistant/sensor/zyxel_poe_<slug>/<metric_id>/config` (retained)
+
+Discovery is re-published on (re)connect and whenever the number of detected ports changes.
 
 ## License
 
