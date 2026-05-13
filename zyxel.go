@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
+	"os"
 	"regexp"
 	"sort"
 	"strconv"
@@ -145,7 +147,7 @@ func runCommand(cfg ZyxelConfig, cmd string) (string, error) {
 	}
 	defer session.Close()
 
-	if err := session.RequestPty("xterm", 80, 40, ssh.TerminalModes{ssh.ECHO: 0}); err != nil {
+	if err := session.RequestPty("xterm", 200, 10000, ssh.TerminalModes{ssh.ECHO: 0}); err != nil {
 		return "", fmt.Errorf("pty request: %w", err)
 	}
 
@@ -188,7 +190,11 @@ func runCommand(cfg ZyxelConfig, cmd string) (string, error) {
 		if r.err != nil {
 			return "", fmt.Errorf("read output: %w", r.err)
 		}
-		return strings.ReplaceAll(string(r.data), "\r", ""), nil
+		out := strings.ReplaceAll(string(r.data), "\r", "")
+		if os.Getenv("DEBUG_FETCH") == "1" {
+			log.Printf("DEBUG_FETCH raw output for %q:\n%s\n--- end output ---", cmd, out)
+		}
+		return out, nil
 	case <-ctx.Done():
 		return "", fmt.Errorf("read timeout")
 	}
