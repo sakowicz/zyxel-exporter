@@ -71,7 +71,7 @@ var (
 	rePortRow        = regexp.MustCompile(`^\s+(\d+)\s+(Enable|Disable)\s+(On|Off)\s+\d+\s+\S+\s+\S+\s+([\d.]+)\s`)
 	rePortHeader     = regexp.MustCompile(`Port\s+State\s+PD`)
 	reMemory         = regexp.MustCompile(`common\s+(\d+)\(B\)\s+(\d+)\(B\)\s+(\d+)\(%\)`)
-	reCPUUsage       = regexp.MustCompile(`CPU usage status:\s*([\d.]+)\s*%`)
+	reCPUUsage       = regexp.MustCompile(`(\d+)\s+(\d+)\s+(\d+\.\d+)`)
 	reIfaceStatus    = regexp.MustCompile(`^\s+(\d+)(?:\s+\S+)?\s+(Down|[\d.]+[MG]/F)\s+(STOP|FORWARDING)\s+\S+\s+(\d+):(\d+):(\d+)`)
 	reIfaceUtil      = regexp.MustCompile(`^\s+(\d+)\s+(?:Down|[\d.]+[MG]/F)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)`)
 	reMacCount       = regexp.MustCompile(`No\s*:\s*(\d+)`)
@@ -260,9 +260,6 @@ func parse(output string) *SwitchData {
 			data.MemoryUsedBytes, _ = strconv.ParseInt(m[2], 10, 64)
 			data.MemoryUsagePercent, _ = strconv.Atoi(m[3])
 		}
-		if m := reCPUUsage.FindStringSubmatch(line); m != nil {
-			data.CPUUsagePercent, _ = strconv.ParseFloat(m[1], 64)
-		}
 		if m := reMacCount.FindStringSubmatch(line); m != nil {
 			data.MacCount, _ = strconv.Atoi(m[1])
 		}
@@ -311,6 +308,27 @@ func parse(output string) *SwitchData {
 	sort.Ints(ports)
 	for _, p := range ports {
 		data.Interfaces = append(data.Interfaces, *ifaceMap[p])
+	}
+
+	// CPU usage is the median of the per-second history from `show
+	// cpu-utilization`. The header line ("CPU usage status: X%") reports just
+	// the current second, which on our SSH polls is dominated by key
+	// exchange / auth / shell setup and spikes to 50-100% — so we ignore the
+	// header and use the ~60-sample per-second table instead.
+	var cpuSamples []float64
+	for _, m := range reCPUUsage.FindAllStringSubmatch(output, -1) {
+		util, err := strconv.ParseFloat(m[3], 64)
+		if err == nil {
+			cpuSamples = append(cpuSamples, util)
+		}
+	}
+	if n := len(cpuSamples); n > 0 {
+		sort.Float64s(cpuSamples)
+		if n%2 == 0 {
+			data.CPUUsagePercent = (cpuSamples[n/2-1] + cpuSamples[n/2]) / 2
+		} else {
+			data.CPUUsagePercent = cpuSamples[n/2]
+		}
 	}
 
 	return data
