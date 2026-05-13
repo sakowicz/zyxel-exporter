@@ -88,6 +88,12 @@ scrape_configs:
       - targets: ['zyxel-exporter:8080']
 ```
 
+### Grafana dashboard
+
+A ready-made dashboard is at [`grafana/zyxel-exporter.json`](grafana/zyxel-exporter.json). It covers every exported metric — switch info, PoE budget + per-port power, CPU/memory, junction temperature, port link status (state timeline), Tx/Rx traffic (Rx mirrored on the negative axis), link utilization, port speed and uptime.
+
+To import: in Grafana go to **Dashboards → New → Import**, upload the JSON and pick your Prometheus datasource when prompted.
+
 ## Home Assistant (MQTT, optional)
 
 Set `MQTT_BROKER_HOST` (and optionally username/password) to enable. On startup the exporter runs `show system-information` and uses the result to populate the HA device block per the [MQTT discovery spec](https://www.home-assistant.io/integrations/mqtt/#mqtt-discovery):
