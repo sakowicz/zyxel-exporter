@@ -24,12 +24,16 @@ type PortData struct {
 }
 
 type SwitchData struct {
-	TotalPower      float64
-	ConsumingPower  float64
-	RemainingPower  float64
-	PoEUsagePercent int
-	JunctionTempC   int
-	Ports           []PortData
+	TotalPower        float64
+	ConsumingPower    float64
+	RemainingPower    float64
+	PoEUsagePercent   int
+	JunctionTempC     int
+	Ports             []PortData
+	CPUUsagePercent   float64
+	MemoryTotalBytes  int64
+	MemoryUsedBytes   int64
+	MemoryUsagePercent int
 }
 
 type SystemInfo struct {
@@ -49,6 +53,8 @@ var (
 	reJunctionTemp   = regexp.MustCompile(`Averaged Junction Temperature:\s*(\d+)\s*\(c\)`)
 	rePortRow        = regexp.MustCompile(`^\s+(\d+)\s+(Enable|Disable)\s+(On|Off)\s+\d+\s+\S+\s+\S+\s+([\d.]+)\s`)
 	rePortHeader     = regexp.MustCompile(`Port\s+State\s+PD`)
+	reMemory         = regexp.MustCompile(`common\s+(\d+)\(B\)\s+(\d+)\(B\)\s+(\d+)\(%\)`)
+	reCPUUsage       = regexp.MustCompile(`CPU usage status:\s*([\d.]+)\s*%`)
 
 	reModel     = regexp.MustCompile(`Product Model\s*:\s*(.+)`)
 	reSysName   = regexp.MustCompile(`System Name\s*:\s*(.+)`)
@@ -59,7 +65,7 @@ var (
 )
 
 func Fetch(cfg ZyxelConfig) (*SwitchData, error) {
-	out, err := runCommand(cfg, "show pwr")
+	out, err := runCommand(cfg, "show pwr\nshow memory\nshow cpu-utilization")
 	if err != nil {
 		return nil, err
 	}
@@ -165,6 +171,14 @@ func parse(output string) *SwitchData {
 		}
 		if m := reJunctionTemp.FindStringSubmatch(line); m != nil {
 			data.JunctionTempC, _ = strconv.Atoi(m[1])
+		}
+		if m := reMemory.FindStringSubmatch(line); m != nil {
+			data.MemoryTotalBytes, _ = strconv.ParseInt(m[1], 10, 64)
+			data.MemoryUsedBytes, _ = strconv.ParseInt(m[2], 10, 64)
+			data.MemoryUsagePercent, _ = strconv.Atoi(m[3])
+		}
+		if m := reCPUUsage.FindStringSubmatch(line); m != nil {
+			data.CPUUsagePercent, _ = strconv.ParseFloat(m[1], 64)
 		}
 
 		if rePortHeader.MatchString(line) {

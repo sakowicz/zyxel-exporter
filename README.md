@@ -1,6 +1,6 @@
-# zyxel-poe-to-mqtt
+# zyxel-to-mqtt
 
-A small Go service that polls a Zyxel PoE switch over SSH and publishes power metrics to MQTT, with Home Assistant auto-discovery.
+A small Go service that polls a Zyxel switch over SSH and publishes PoE power, system CPU/memory and temperature metrics to MQTT, with Home Assistant auto-discovery.
 
 ## What it exposes
 
@@ -11,6 +11,9 @@ For the switch as a whole:
 - Remaining Power (W)
 - PoE Usage (%)
 - Junction Temperature (°C)
+- CPU Usage (%)
+- Memory Usage (%)
+- Memory Used (MiB)
 
 Plus per-port power draw in watts for every PoE port reported by `show pwr`.
 
@@ -30,7 +33,7 @@ On startup the service also runs `show system-information` and uses the result t
 
 ## Requirements
 
-- A Zyxel PoE switch with SSH enabled and a user with **privilege level 3 or higher** so it can run `show pwr` and `show system-information`. Tested on the **Zyxel XMG1915-10EP**, but should work on any Zyxel PoE switch that exposes SSH and those two commands.
+- A Zyxel PoE switch with SSH enabled and a user with **privilege level 3 or higher** so it can run `show pwr`, `show system-information`, `show memory` and `show cpu-utilization`. Tested on the **Zyxel XMG1915-10EP**, but should work on any Zyxel PoE switch that exposes SSH and these commands.
 - An MQTT broker reachable from the container
 - Home Assistant with the MQTT integration (optional — discovery is published to the `homeassistant/` prefix)
 
@@ -58,7 +61,7 @@ A `/health` endpoint is exposed on port `8080`.
 A prebuilt image is published to GHCR by CI:
 
 ```
-ghcr.io/sakowicz/zyxel-poe-to-mqtt:latest
+ghcr.io/sakowicz/zyxel-to-mqtt:latest
 ```
 
 Or use the included `docker-compose.yml`:

@@ -152,11 +152,14 @@ func Publish(mc *mqttClient, data *SwitchData) error {
 	}
 
 	states := map[string]string{
-		"total_power":       fmt.Sprintf("%.1f", data.TotalPower),
-		"consuming_power":   fmt.Sprintf("%.1f", data.ConsumingPower),
-		"remaining_power":   fmt.Sprintf("%.1f", data.RemainingPower),
-		"poe_usage_percent": fmt.Sprintf("%d", data.PoEUsagePercent),
-		"junction_temp":     fmt.Sprintf("%d", data.JunctionTempC),
+		"total_power":          fmt.Sprintf("%.1f", data.TotalPower),
+		"consuming_power":      fmt.Sprintf("%.1f", data.ConsumingPower),
+		"remaining_power":      fmt.Sprintf("%.1f", data.RemainingPower),
+		"poe_usage_percent":    fmt.Sprintf("%d", data.PoEUsagePercent),
+		"junction_temp":        fmt.Sprintf("%d", data.JunctionTempC),
+		"cpu_usage_percent":    fmt.Sprintf("%.2f", data.CPUUsagePercent),
+		"memory_usage_percent": fmt.Sprintf("%d", data.MemoryUsagePercent),
+		"memory_used":          fmt.Sprintf("%.2f", float64(data.MemoryUsedBytes)/1048576),
 	}
 	for _, p := range data.Ports {
 		states[fmt.Sprintf("port_%d_power", p.Port)] = fmt.Sprintf("%.1f", p.Consumption)
@@ -184,6 +187,9 @@ func (mc *mqttClient) publishDiscovery(data *SwitchData) {
 		{"remaining_power", "Remaining Power", "W", "power", 1},
 		{"poe_usage_percent", "PoE Usage", "%", "", 0},
 		{"junction_temp", "Junction Temperature", "°C", "temperature", 0},
+		{"cpu_usage_percent", "CPU Usage", "%", "", 1},
+		{"memory_usage_percent", "Memory Usage", "%", "", 0},
+		{"memory_used", "Memory Used", "MiB", "data_size", 1},
 	}
 
 	for _, s := range static {
