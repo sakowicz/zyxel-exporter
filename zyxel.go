@@ -39,18 +39,18 @@ type InterfaceData struct {
 }
 
 type SwitchData struct {
-	TotalPower        float64
-	ConsumingPower    float64
-	RemainingPower    float64
-	PoEUsagePercent   int
-	JunctionTempC     int
-	Ports             []PortData
-	CPUUsagePercent   float64
-	MemoryTotalBytes  int64
-	MemoryUsedBytes   int64
+	TotalPower         float64
+	ConsumingPower     float64
+	RemainingPower     float64
+	PoEUsagePercent    int
+	JunctionTempC      int
+	Ports              []PortData
+	CPUUsagePercent    float64
+	MemoryTotalBytes   int64
+	MemoryUsedBytes    int64
 	MemoryUsagePercent int
-	Interfaces        []InterfaceData
-	MacCount          int
+	Interfaces         []InterfaceData
+	MacCount           int
 }
 
 type SystemInfo struct {
@@ -165,13 +165,13 @@ func runCommand(cfg ZyxelConfig, cmd string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("ssh dial: %w", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	session, err := client.NewSession()
 	if err != nil {
 		return "", fmt.Errorf("ssh session: %w", err)
 	}
-	defer session.Close()
+	defer func() { _ = session.Close() }()
 
 	if err := session.RequestPty("xterm", 200, 10000, ssh.TerminalModes{ssh.ECHO: 0}); err != nil {
 		return "", fmt.Errorf("pty request: %w", err)

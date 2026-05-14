@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"strconv"
 	"syscall"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/robfig/cron/v3"
@@ -139,7 +140,15 @@ func main() {
 	}()
 
 	log.Printf("started, schedule=%q listen=%s", cfg.CronSchedule, cfg.ListenAddr)
-	if err := http.ListenAndServe(cfg.ListenAddr, httpHandler()); err != nil {
+	srv := &http.Server{
+		Addr:              cfg.ListenAddr,
+		Handler:           httpHandler(),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+	if err := srv.ListenAndServe(); err != nil {
 		log.Fatalf("http: %v", err)
 	}
 }

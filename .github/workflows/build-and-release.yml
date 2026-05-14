@@ -38,8 +38,23 @@ jobs:
     - name: Build
       run: go build -v ./...
 
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.23'
+
+    - name: golangci-lint
+      uses: golangci/golangci-lint-action@v6
+      with:
+        version: v2.12
+
   build-and-release:
-    needs: test
+    needs: [test, lint]
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main')
     permissions:
@@ -163,7 +178,7 @@ jobs:
         prerelease: false
 
   build-pr:
-    needs: test
+    needs: [test, lint]
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     permissions:

@@ -1,0 +1,45 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    - errcheck      # unchecked errors
+    - govet         # suspicious constructs (printf args, shadowed vars, etc.)
+    - staticcheck   # ~150 advanced static analysis checks
+    - unused        # dead code (functions, vars, consts)
+    - ineffassign   # ineffective assignments
+    - gosec         # security issues (hardcoded creds, weak crypto, etc.)
+    - misspell      # common typos
+    - unconvert     # redundant type conversions
+
+  settings:
+    errcheck:
+      exclude-functions:
+        # We deliberately ignore errors from these — they're best-effort writes
+        # to clients/loggers that we can't usefully recover from.
+        - (net/http.ResponseWriter).Write
+        - (io.Closer).Close
+        - fmt.Fprintf
+        - fmt.Fprint
+        - fmt.Fprintln
+
+    gosec:
+      excludes:
+        - G104 # Audit errors not checked — duplicates errcheck
+        - G115 # Integer overflow conversions — too noisy on bytes/ports
+
+  exclusions:
+    rules:
+      # Tests don't need to be production-grade
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gosec
+          - unused
+
+formatters:
+  enable:
+    - gofmt

@@ -34,7 +34,7 @@ type haDevice struct {
 	Manufacturer     string     `json:"manufacturer"`
 	SwVersion        string     `json:"sw_version,omitempty"`
 	HwVersion        string     `json:"hw_version,omitempty"`
-	SerialNumber    string     `json:"serial_number,omitempty"`
+	SerialNumber     string     `json:"serial_number,omitempty"`
 	ConfigurationURL string     `json:"configuration_url,omitempty"`
 }
 
