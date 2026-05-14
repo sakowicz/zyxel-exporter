@@ -286,6 +286,221 @@ func TestParseLinkSpeed(t *testing.T) {
 	}
 }
 
+// --- Variations: different port counts, models, edge cases. ---
+
+// 24-port GS1900-style switch — same CLI shape, just more rows.
+const sampleInterfacesStatus24 = `  Port      Name          Link        State             Type          Up Time
+  ---- ------------- -------------- ---------- -------------------- ----------
+     1                         1G/F FORWARDING               100M/1G   12:00:00
+     2                         1G/F FORWARDING               100M/1G   12:00:00
+     3                         Down       STOP               100M/1G    0:00:00
+     4                         1G/F FORWARDING               100M/1G   11:59:55
+     5                         Down       STOP               100M/1G    0:00:00
+     6                         1G/F FORWARDING               100M/1G    8:30:12
+     7                         Down       STOP               100M/1G    0:00:00
+     8                         Down       STOP               100M/1G    0:00:00
+     9                         Down       STOP               100M/1G    0:00:00
+    10                         1G/F FORWARDING               100M/1G   10:15:33
+    11                         Down       STOP               100M/1G    0:00:00
+    12                         Down       STOP               100M/1G    0:00:00
+    13                         Down       STOP               100M/1G    0:00:00
+    14                         Down       STOP               100M/1G    0:00:00
+    15                         Down       STOP               100M/1G    0:00:00
+    16                         Down       STOP               100M/1G    0:00:00
+    17                         Down       STOP               100M/1G    0:00:00
+    18                         Down       STOP               100M/1G    0:00:00
+    19                         Down       STOP               100M/1G    0:00:00
+    20                         Down       STOP               100M/1G    0:00:00
+    21                         Down       STOP               100M/1G    0:00:00
+    22                         Down       STOP               100M/1G    0:00:00
+    23                         Down       STOP               100M/1G    0:00:00
+    24                         1G/F FORWARDING               100M/1G   12:00:00
+    25                        10G/F FORWARDING               1G/10G     6:00:00
+    26                         Down       STOP               1G/10G    0:00:00
+`
+
+// Switch where ports have user-assigned names (e.g. "uplink", "ap-01").
+const sampleInterfacesStatusNamed = `  Port      Name          Link        State             Type          Up Time
+  ---- ------------- -------------- ---------- -------------------- ----------
+     1 uplink-core           2.5G/F FORWARDING         100M/1G/2.5G  135:29:08
+     2 ap-livingroom         100M/F FORWARDING         100M/1G/2.5G  135:30:10
+     3                         Down       STOP         100M/1G/2.5G    0:00:00
+`
+
+// Non-PoE switch / unsupported command — Zyxel returns a brief error.
+const samplePwrUnsupported = `% Invalid input detected at '^' marker.
+`
+
+// PoE present but nothing connected — all 8 ports report 0.0W and Off.
+const samplePwrAllOff = `  Port     State    PD     Pri.    PD_Class       CDP    Cons.(W)
+  ----    --------  ------ ------  -----------    -----  ----------
+     1    Enable    Off    3       IEEE802.3at    n      0.0
+     2    Enable    Off    3       IEEE802.3at    n      0.0
+     3    Enable    Off    3       IEEE802.3at    n      0.0
+     4    Enable    Off    3       IEEE802.3at    n      0.0
+     5    Enable    Off    3       IEEE802.3at    n      0.0
+     6    Enable    Off    3       IEEE802.3at    n      0.0
+     7    Enable    Off    3       IEEE802.3at    n      0.0
+     8    Enable    Off    3       IEEE802.3at    n      0.0
+   Total Power:            130.0(W)
+   Consuming Power:        0.0(W)
+   Remaining Power:        130.0(W)
+   PoE Usage:              0(%)
+   Averaged Junction Temperature:  42 (c)
+`
+
+// PoE with a port administratively disabled (Disable state).
+const samplePwrPartialDisabled = `  Port     State    PD     Pri.    PD_Class       CDP    Cons.(W)
+  ----    --------  ------ ------  -----------    -----  ----------
+     1    Disable   Off    3       IEEE802.3at    n      0.0
+     2    Enable    On     3       IEEE802.3at    n      8.4
+   Total Power:            130.0(W)
+   Consuming Power:        8.4(W)
+   Remaining Power:        121.6(W)
+   PoE Usage:              6(%)
+   Averaged Junction Temperature:  50 (c)
+`
+
+func TestParseInterfaces_24Port(t *testing.T) {
+	d := parse(sampleInterfacesStatus24)
+
+	if len(d.Interfaces) != 26 {
+		t.Fatalf("Interfaces = %d, want 26 (24 + 2 uplinks)", len(d.Interfaces))
+	}
+
+	byPort := map[int]InterfaceData{}
+	for _, iface := range d.Interfaces {
+		byPort[iface.Port] = iface
+	}
+
+	if !byPort[1].LinkUp || byPort[1].LinkSpeedMbps != 1000 {
+		t.Errorf("port 1: up=%v speed=%d, want up=true speed=1000", byPort[1].LinkUp, byPort[1].LinkSpeedMbps)
+	}
+	if byPort[25].LinkSpeedMbps != 10000 {
+		t.Errorf("port 25 (10G uplink): speed=%d, want 10000", byPort[25].LinkSpeedMbps)
+	}
+	// 12:00:00 = 12 * 3600 = 43200
+	if byPort[1].UptimeSeconds != 43200 {
+		t.Errorf("port 1 UptimeSeconds = %d, want 43200", byPort[1].UptimeSeconds)
+	}
+}
+
+func TestParseInterfaces_NamedPorts(t *testing.T) {
+	d := parse(sampleInterfacesStatusNamed)
+
+	if len(d.Interfaces) != 3 {
+		t.Fatalf("Interfaces = %d, want 3", len(d.Interfaces))
+	}
+
+	byPort := map[int]InterfaceData{}
+	for _, iface := range d.Interfaces {
+		byPort[iface.Port] = iface
+	}
+
+	// The optional name token between port number and link state must not
+	// throw off the parser.
+	if !byPort[1].LinkUp || byPort[1].LinkSpeedMbps != 2500 {
+		t.Errorf("port 1 (named uplink-core): up=%v speed=%d, want up=true speed=2500", byPort[1].LinkUp, byPort[1].LinkSpeedMbps)
+	}
+	if !byPort[2].LinkUp || byPort[2].LinkSpeedMbps != 100 {
+		t.Errorf("port 2 (named ap-livingroom): up=%v speed=%d, want up=true speed=100", byPort[2].LinkUp, byPort[2].LinkSpeedMbps)
+	}
+	if byPort[3].LinkUp {
+		t.Errorf("port 3 (unnamed, down): up=%v, want false", byPort[3].LinkUp)
+	}
+}
+
+func TestParsePower_Unsupported(t *testing.T) {
+	// Non-PoE switch: `show pwr` returns an error. Parser must not crash
+	// and must produce zero PoE values + no ports.
+	d := parse(samplePwrUnsupported)
+
+	if d.TotalPower != 0 || d.ConsumingPower != 0 || d.RemainingPower != 0 {
+		t.Errorf("PoE values should be zero on non-PoE switch, got total=%v consuming=%v remaining=%v",
+			d.TotalPower, d.ConsumingPower, d.RemainingPower)
+	}
+	if len(d.Ports) != 0 {
+		t.Errorf("Ports = %d, want 0 on non-PoE switch", len(d.Ports))
+	}
+}
+
+func TestParsePower_AllOff(t *testing.T) {
+	d := parse(samplePwrAllOff)
+
+	if d.ConsumingPower != 0.0 {
+		t.Errorf("ConsumingPower = %v, want 0.0", d.ConsumingPower)
+	}
+	if d.PoEUsagePercent != 0 {
+		t.Errorf("PoEUsagePercent = %v, want 0", d.PoEUsagePercent)
+	}
+	if len(d.Ports) != 8 {
+		t.Fatalf("Ports = %d, want 8 (all enabled, all off)", len(d.Ports))
+	}
+	for _, p := range d.Ports {
+		if p.Consumption != 0.0 {
+			t.Errorf("port %d consumption = %v, want 0.0", p.Port, p.Consumption)
+		}
+	}
+}
+
+func TestParsePower_PartialDisabled(t *testing.T) {
+	d := parse(samplePwrPartialDisabled)
+
+	if len(d.Ports) != 2 {
+		t.Fatalf("Ports = %d, want 2", len(d.Ports))
+	}
+
+	consumption := map[int]float64{}
+	for _, p := range d.Ports {
+		consumption[p.Port] = p.Consumption
+	}
+	if consumption[1] != 0.0 {
+		t.Errorf("port 1 (disabled): consumption=%v, want 0.0", consumption[1])
+	}
+	if consumption[2] != 8.4 {
+		t.Errorf("port 2 (enabled, on): consumption=%v, want 8.4", consumption[2])
+	}
+}
+
+func TestParse_EmptyInput(t *testing.T) {
+	// Worst-case: every SSH command failed and we got nothing. Parser
+	// should return a zero-valued struct, not panic.
+	d := parse("")
+	if d == nil {
+		t.Fatal("parse(\"\") returned nil")
+	}
+	if d.TotalPower != 0 || len(d.Ports) != 0 || len(d.Interfaces) != 0 || d.MacCount != 0 {
+		t.Errorf("expected zero-valued SwitchData, got %+v", d)
+	}
+}
+
+func TestParse_GarbageInput(t *testing.T) {
+	// Random text shouldn't extract anything.
+	d := parse("hello world\nthis is not a switch output\nfoo bar 123\n")
+	if d.TotalPower != 0 || len(d.Ports) != 0 || len(d.Interfaces) != 0 {
+		t.Errorf("expected nothing extracted from garbage, got %+v", d)
+	}
+}
+
+func TestParseLinkSpeed_ExoticSpeeds(t *testing.T) {
+	cases := []struct {
+		in   string
+		want int
+	}{
+		{"5G/F", 5000},   // 5GBASE-T
+		{"25G/F", 25000}, // 25G SFP28
+		{"40G/F", 40000}, // 40G QSFP+
+		{"10M/F", 10},    // legacy 10Base-T
+		{"100G/F", 100000},
+		{"bogus", 0}, // garbage falls back to 0
+	}
+	for _, c := range cases {
+		if got := parseLinkSpeed(c.in); got != c.want {
+			t.Errorf("parseLinkSpeed(%q) = %d, want %d", c.in, got, c.want)
+		}
+	}
+}
+
 // Combined output — verifies the parser handles all six commands concatenated
 // (the actual Fetch order) without one section's data bleeding into another's.
 func TestParseCombined(t *testing.T) {
