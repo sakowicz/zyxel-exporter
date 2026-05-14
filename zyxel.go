@@ -68,7 +68,7 @@ var (
 	reRemainingPower = regexp.MustCompile(`Remaining Power:\s*([\d.]+)\(W\)`)
 	rePoEUsage       = regexp.MustCompile(`PoE Usage:\s*(\d+)\(%\)`)
 	reJunctionTemp   = regexp.MustCompile(`Averaged Junction Temperature:\s*(\d+)\s*\(c\)`)
-	rePortRow        = regexp.MustCompile(`^\s+(\d+)\s+(Enable|Disable)\s+(On|Off)\s+\d+\s+\S+\s+\S+\s+([\d.]+)\s`)
+	rePortRow        = regexp.MustCompile(`^\s+(\d+)\s+(Enable|Disable)\s+(On|Off)\s+\d+\s+\S+\s+\S+\s+([\d.]+)`)
 	rePortHeader     = regexp.MustCompile(`Port\s+State\s+PD`)
 	reMemory         = regexp.MustCompile(`common\s+(\d+)\(B\)\s+(\d+)\(B\)\s+(\d+)\(%\)`)
 	reCPUUsage       = regexp.MustCompile(`(\d+)\s+(\d+)\s+(\d+\.\d+)`)
