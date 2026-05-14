@@ -2,9 +2,12 @@ package main
 
 import (
 	"strconv"
+	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
 )
+
+var registerOnce sync.Once
 
 var (
 	metricInfo = prometheus.NewGaugeVec(prometheus.GaugeOpts{
@@ -88,27 +91,29 @@ var (
 )
 
 func RegisterMetrics() {
-	prometheus.MustRegister(
-		metricInfo,
-		metricTotalPower,
-		metricConsumingPower,
-		metricRemainingPower,
-		metricPoEUsage,
-		metricJunctionTemp,
-		metricCPUUsage,
-		metricMemoryTotal,
-		metricMemoryUsed,
-		metricMemoryUsage,
-		metricPortPower,
-		metricPortLinkUp,
-		metricPortSpeed,
-		metricPortUptime,
-		metricPortTxBps,
-		metricPortRxBps,
-		metricPortTxUtil,
-		metricPortRxUtil,
-		metricMacCount,
-	)
+	registerOnce.Do(func() {
+		prometheus.MustRegister(
+			metricInfo,
+			metricTotalPower,
+			metricConsumingPower,
+			metricRemainingPower,
+			metricPoEUsage,
+			metricJunctionTemp,
+			metricCPUUsage,
+			metricMemoryTotal,
+			metricMemoryUsed,
+			metricMemoryUsage,
+			metricPortPower,
+			metricPortLinkUp,
+			metricPortSpeed,
+			metricPortUptime,
+			metricPortTxBps,
+			metricPortRxBps,
+			metricPortTxUtil,
+			metricPortRxUtil,
+			metricMacCount,
+		)
+	})
 }
 
 func SetSystemInfo(info *SystemInfo) {

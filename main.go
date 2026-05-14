@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -19,51 +20,66 @@ type Config struct {
 	ListenAddr   string
 }
 
-func loadConfig() Config {
-	required := func(key string) string {
+func loadConfig() (Config, error) {
+	var missing []string
+	must := func(key string) string {
 		v := os.Getenv(key)
 		if v == "" {
-			log.Fatalf("required env var %s is not set", key)
+			missing = append(missing, key)
 		}
 		return v
 	}
 
-	port := 1883
-	if p := os.Getenv("MQTT_BROKER_PORT"); p != "" {
-		if n, err := strconv.Atoi(p); err == nil {
-			port = n
-		}
-	}
-
-	schedule := os.Getenv("CRON_SCHEDULE")
-	if schedule == "" {
-		schedule = "* * * * *"
-	}
-
-	listen := os.Getenv("HTTP_LISTEN")
-	if listen == "" {
-		listen = ":8080"
-	}
-
-	return Config{
+	cfg := Config{
 		Zyxel: ZyxelConfig{
-			Host:     required("ZYXEL_DEVICE_IP"),
-			Username: required("ZYXEL_DEVICE_USERNAME"),
-			Password: required("ZYXEL_DEVICE_PASSWORD"),
+			Host:     must("ZYXEL_DEVICE_IP"),
+			Username: must("ZYXEL_DEVICE_USERNAME"),
+			Password: must("ZYXEL_DEVICE_PASSWORD"),
 		},
 		MQTT: MQTTConfig{
 			Host:     os.Getenv("MQTT_BROKER_HOST"),
-			Port:     port,
+			Port:     1883,
 			Username: os.Getenv("MQTT_BROKER_USERNAME"),
 			Password: os.Getenv("MQTT_BROKER_PASSWORD"),
 		},
-		CronSchedule: schedule,
-		ListenAddr:   listen,
+		CronSchedule: "* * * * *",
+		ListenAddr:   ":8080",
 	}
+
+	if len(missing) > 0 {
+		return cfg, fmt.Errorf("required env vars not set: %v", missing)
+	}
+
+	if p := os.Getenv("MQTT_BROKER_PORT"); p != "" {
+		if n, err := strconv.Atoi(p); err == nil {
+			cfg.MQTT.Port = n
+		}
+	}
+	if s := os.Getenv("CRON_SCHEDULE"); s != "" {
+		cfg.CronSchedule = s
+	}
+	if l := os.Getenv("HTTP_LISTEN"); l != "" {
+		cfg.ListenAddr = l
+	}
+
+	return cfg, nil
+}
+
+func httpHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.Handler())
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	})
+	return mux
 }
 
 func main() {
-	cfg := loadConfig()
+	cfg, err := loadConfig()
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	RegisterMetrics()
 
@@ -110,12 +126,6 @@ func main() {
 	}
 	c.Start()
 
-	http.Handle("/metrics", promhttp.Handler())
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
-	})
-
 	go func() {
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, syscall.SIGTERM, syscall.SIGINT)
@@ -129,7 +139,7 @@ func main() {
 	}()
 
 	log.Printf("started, schedule=%q listen=%s", cfg.CronSchedule, cfg.ListenAddr)
-	if err := http.ListenAndServe(cfg.ListenAddr, nil); err != nil {
+	if err := http.ListenAndServe(cfg.ListenAddr, httpHandler()); err != nil {
 		log.Fatalf("http: %v", err)
 	}
 }
